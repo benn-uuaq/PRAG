@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --clean --onedir --windowed --name PRAG_260609 --icon logo.ico --add-data "VISION;VISION" --add-data "UI;UI" --add-data "DB;DB" --add-data "IO;IO" --add-data "ROBOT_CONTROL;ROBOT_CONTROL" --exclude-module PySide6 ppap_main.py
