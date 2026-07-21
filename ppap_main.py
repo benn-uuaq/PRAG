@@ -1618,6 +1618,21 @@ class PPAPUI(QMainWindow):
                 # ===============================
                 if not self.job_move_home():
                     break
+                
+                # =======================================================
+                # 외부 PLC 작업 수량 도달(정지) 신호 확인 (DI 8번 핀)
+                # =======================================================
+                try:
+                    di_values = self.io.Read_Input_Data()
+                    # 8번 핀(plc_work_done) 신호가 1(ON)인지 확인
+                    if di_values and len(di_values) > 8 and di_values[self.io.plc_work_done] == 1:
+                        print("[INFO] 외부 PLC 작업 수량 도달(정지) 신호 감지(8번 핀) → 작업을 정지합니다.")
+                        self.is_auto_running = False
+                        self.robot_send.robot_stop()
+                        break
+                except Exception as e:
+                    print(f"[WARN] PLC 정지 신호 확인 중 오류 발생: {e}")
+                # =======================================================
 
                 # ===============================
                 # 2. VISION

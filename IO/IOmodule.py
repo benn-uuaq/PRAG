@@ -31,6 +31,9 @@ class IO_Module_Class(QThread):
         self.vacuum_Success_serson=1
         self.BIN_cylinder_ON_serson=2
         self.BIN_cylinder_OFF_serson=3
+        
+        self.plc_work_done=8
+        
         self.emergency_stop=10
         
         
