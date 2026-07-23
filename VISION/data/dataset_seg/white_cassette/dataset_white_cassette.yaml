@@ -1,0 +1,5 @@
+names:
+  0: white_cassette
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\white_cassette
+train: images/train
+val: images/val

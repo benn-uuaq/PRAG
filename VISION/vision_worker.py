@@ -180,4 +180,24 @@ class VisionWorker(QThread):
                 print("[VISION WORKER] YOLO wrapper reloaded.")
         finally:
             self.mutex.unlock()
+            
+    def change_model(self, model_path: str):
+        """
+        UI에서 선택한 제품의 단독 모델 가중치로 안전하게 교체
+        """
+        self.mutex.lock()
+        try:
+            # YOLOToRobotQt 객체 내부에 가중치를 변경하는 로직 호출
+            if hasattr(self.yolo_qt, "load_model"):
+                self.yolo_qt.load_model(model_path)
+            else:
+                # 기존 객체의 가중치 경로 변수를 덮어쓰고 설정 리로드
+                self.yolo_qt.weight_path = str(model_path)
+                self.yolo_qt.reload_config()
+                
+            print(f"[VISION WORKER] 모델 교체 완료: {model_path}")
+        except Exception as e:
+            print(f"[VISION WORKER ERROR] 모델 교체 실패: {e}")
+        finally:
+            self.mutex.unlock()
 

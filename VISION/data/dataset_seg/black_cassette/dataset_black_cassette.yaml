@@ -1,0 +1,5 @@
+names:
+  0: black_cassette
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\black_cassette
+train: images/train
+val: images/val

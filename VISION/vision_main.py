@@ -122,3 +122,13 @@ class VisionMain(QObject):
         )
         dlg.exec_()
         self.worker.reload_vision_config()
+        
+    # --------------------------------------------------
+    # 🔥 로봇 작업용 모델 동적 변경
+    # --------------------------------------------------
+    def change_target_model(self, model_path: str):
+        """
+        메인 UI에서 선택된 제품 가중치 경로를 Worker로 전달
+        """
+        if self.worker:
+            self.worker.change_model(model_path)

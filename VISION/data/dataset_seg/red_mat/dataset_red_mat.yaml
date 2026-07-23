@@ -1,0 +1,5 @@
+names:
+  0: red_mat
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\red_mat
+train: images/train
+val: images/val

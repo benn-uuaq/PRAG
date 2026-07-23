@@ -1,0 +1,5 @@
+names:
+  0: red_heart
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\red_heart
+train: images/train
+val: images/val

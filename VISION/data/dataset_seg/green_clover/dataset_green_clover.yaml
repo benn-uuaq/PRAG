@@ -1,0 +1,5 @@
+names:
+  0: green_clover
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\green_clover
+train: images/train
+val: images/val

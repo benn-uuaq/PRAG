@@ -1,0 +1,5 @@
+names:
+  0: book_insert
+path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\book_insert
+train: images/train
+val: images/val

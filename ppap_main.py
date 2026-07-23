@@ -453,6 +453,8 @@ class PPAPUI(QMainWindow):
         self.robot_status_update()
         self.vision.start_camera()
         
+        self.refresh_model_list()
+        
     def robot_alarm_reset_button(self):
         try:
             self.buzzer_value = False
@@ -672,6 +674,34 @@ class PPAPUI(QMainWindow):
 
         except Exception as e:
             print("[VISION UI ERROR]", e) 
+            
+    def refresh_model_list(self):
+        """학습 완료된 best_*.pt 파일들을 찾아 콤보박스에 로드"""
+        try:
+            self.ui.product_combo.clear()
+            
+            # 가중치가 저장된 루트 폴더 경로 지정 (프로젝트 환경에 맞게 수정 필요)
+            weight_root = APP_ROOT / "VISION/data/runs_seg"
+            if not weight_root.exists():
+                print("[WARN] 가중치 폴더가 존재하지 않습니다:", weight_root)
+                return
+                
+            # best_*.pt 파일 탐색
+            weight_files = list(weight_root.rglob("best_*.pt"))
+            
+            for pt_file in weight_files:
+                # 파일명에서 'best_'와 '.pt'를 제거하여 제품명만 추출 (예: best_black_cassette.pt -> black_cassette)
+                product_name = pt_file.stem.replace("best_", "")
+                # 콤보박스 화면에는 제품명을 표시하고, 내부 Data로는 실제 pt 파일 경로를 저장
+                self.ui.product_combo.addItem(product_name, str(pt_file))
+                
+            if self.ui.product_combo.count() == 0:
+                self.ui.product_combo.addItem("학습된 모델 없음", "")
+            else:
+                print(f"[INFO] 총 {self.ui.product_combo.count()}개의 제품 모델을 로드했습니다.")
+                
+        except Exception as e:
+            print(f"[ERROR] 모델 목록 로드 실패: {e}")
         
     @pyqtSlot()
     def on_robot_disconnected(self):
@@ -1936,6 +1966,39 @@ class PPAPUI(QMainWindow):
                 print("[WARN] 포즈 캐시 없음. update_all_fk_poses() 필요.")
                 QMessageBox.warning(self, "데이터 없음", "로봇 좌표 데이터가 없습니다.\n초기화 후 다시 시도하세요.")
                 return
+            
+            # ⭐ 1. 가중치 저장 폴더에서 best_*.pt 파일 탐색
+            weight_root = APP_ROOT / "VISION/data/runs_seg"
+            weight_files = list(weight_root.rglob("best_*.pt")) if weight_root.exists() else []
+            
+            if not weight_files:
+                QMessageBox.warning(self, "모델 오류", "학습된 단독 모델(best_*.pt)을 찾을 수 없습니다.\n먼저 AI 학습을 진행해주세요.")
+                return
+
+            # 파일명에서 'best_'와 '.pt'를 제외한 제품명 맵핑 (예: best_black_cassette.pt -> black_cassette)
+            product_map = {f.stem.replace("best_", ""): str(f) for f in weight_files}
+            product_names = list(product_map.keys())
+
+            # ⭐ 2. QInputDialog를 통해 작업자에게 피킹할 제품 선택 받기
+            selected_product, ok = QInputDialog.getItem(
+                self, 
+                "작업 제품 선택", 
+                "피킹 작업을 진행할 제품을 선택하세요:", 
+                product_names, 
+                0, 
+                False
+            )
+
+            # 취소 버튼을 누르거나 선택하지 않은 경우 작업 시작 취소
+            if not ok or not selected_product:
+                print("[INFO] 제품 선택이 취소되어 작업을 시작하지 않습니다.")
+                return
+
+            selected_model_path = product_map[selected_product]
+            print(f"[INFO] 선택된 제품: '{selected_product}' (모델 경로: {selected_model_path})")
+            
+            # ⭐ 3. 비전 시스템(Worker)에 선택된 단독 모델 적용
+            self.vision.change_target_model(selected_model_path)
 
             # 1. 상태 잠금 (가장 먼저)
             self.is_auto_running = True
