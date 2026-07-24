@@ -1,18 +1,18 @@
 task: segment
 mode: train
-model: D:\6.  Project\PRAG\PRAG_260721_test\VISION\config\yolo11n-seg.pt
-data: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\clean_cassette\dataset_clean_cassette.yaml
+model: D:\6.  Project\PRAG\PRAG\VISION\config\yolo11n-seg.pt
+data: D:\6.  Project\PRAG\PRAG\VISION\data\dataset_seg\clean_cassette\dataset_clean_cassette.yaml
 epochs: 10
 time: null
 patience: 5
-batch: 16
+batch: 8
 imgsz: 640
 save: true
 save_period: -1
 cache: false
-device: '0'
-workers: 2
-project: D:\6.  Project\PRAG\PRAG_260721_test\VISION\runs_seg
+device: cpu
+workers: 0
+project: D:\6.  Project\PRAG\PRAG\VISION\runs_seg
 name: seg_clean_cassette
 exist_ok: true
 pretrained: true
@@ -29,7 +29,7 @@ amp: true
 fraction: 1.0
 profile: false
 freeze: null
-multi_scale: 0.0
+multi_scale: false
 compile: false
 overlap_mask: true
 mask_ratio: 4
@@ -43,7 +43,6 @@ max_det: 300
 half: false
 dnn: false
 plots: true
-end2end: null
 source: null
 vid_stride: 1
 stream_buffer: false
@@ -80,12 +79,9 @@ warmup_momentum: 0.8
 warmup_bias_lr: 0.1
 box: 7.5
 cls: 0.5
-cls_pw: 0.0
 dfl: 1.5
 pose: 12.0
 kobj: 1.0
-rle: 1.0
-angle: 1.0
 nbs: 64
 hsv_h: 0.015
 hsv_s: 0.7
@@ -107,4 +103,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: D:\6.  Project\PRAG\PRAG_260721_test\VISION\runs_seg\seg_clean_cassette
+save_dir: D:\6.  Project\PRAG\PRAG\VISION\runs_seg\seg_clean_cassette

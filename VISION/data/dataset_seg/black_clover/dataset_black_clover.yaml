@@ -1,5 +1,5 @@
 names:
   0: black_clover
-path: D:\6.  Project\PRAG\PRAG_260721_test\VISION\data\dataset_seg\black_clover
+path: D:\6.  Project\PRAG\PRAG\VISION\data\dataset_seg\black_clover
 train: images/train
 val: images/val

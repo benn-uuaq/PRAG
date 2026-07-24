@@ -3,11 +3,19 @@ import ast
 import time
 import math
 import socket
-import select 
+import select
 import traceback
 import threading
+import faulthandler
 import numpy as np
 from pathlib import Path
+
+faulthandler.enable()
+
+# ⭐ [DLL 로딩 순서] torch는 PyQt5보다 먼저 import 되어야 함.
+# PyQt5가 먼저 로드되어 있으면 torch/lib/c10.dll 로딩 중 access violation 발생 확인됨.
+import torch  # noqa: F401
+from ultralytics import YOLO  # noqa: F401
 
 from PyQt5.QtWidgets import *
 from PyQt5 import QtGui
@@ -16,8 +24,10 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QMetaObject, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap
 
 PC_IP = "192.168.3.30"
-ROBOT_IP = "192.168.2.202"
-IO_IP = "192.168.1.150"
+# ROBOT_IP = "192.168.2.202"
+ROBOT_IP = "192.168.227.134"
+# IO_IP = "192.168.1.150"
+IO_IP = "127.0.0.1"
 IO_PORT = 502
 
 Z_LIMIT = 0.055 # 단위: m
@@ -453,7 +463,58 @@ class PPAPUI(QMainWindow):
         self.robot_status_update()
         self.vision.start_camera()
         
-        self.refresh_model_list()
+        self.load_default_vision_model()
+    
+    def load_default_vision_model(self):
+        """앱 시작 시 runs_seg 폴더 내 첫 번째 best_*.pt 모델을 기본으로 로드"""
+        try:
+            weight_root = APP_ROOT / "VISION/runs_seg"
+            if weight_root.exists():
+                first_model = next(weight_root.rglob("best_*.pt"), None)
+                if first_model:
+                    product_name = first_model.stem.replace("best_", "")
+                    print(f"[INFO] 💡 기본 비전 모델 자동 로드: '{product_name}' ({first_model.name})")
+                    
+                    # ⭐ [추가] 현재 활성 모델 정보 기억
+                    self.current_product_name = product_name
+                    self.current_model_path = str(first_model)
+                    
+                    self.vision.change_target_model(str(first_model))
+        except Exception as e:
+            print(f"[WARN] 기본 비전 모델 로드 실패: {e}")
+
+    def select_product_model(self, title="제품 선택", label="작업을 진행할 제품 모델을 선택하세요:"):
+        """학습된 best_*.pt 목록을 스캔하여 고대비 팝업창(QInputDialog)으로 사용자 선택을 받는 공통 메서드"""
+        weight_root = APP_ROOT / "VISION/runs_seg"
+        weight_files = list(weight_root.rglob("best_*.pt")) if weight_root.exists() else []
+        
+        if not weight_files:
+            QMessageBox.warning(self, "모델 오류", "학습된 단독 모델(best_*.pt)을 찾을 수 없습니다.\n먼저 AI 학습을 진행해주세요.")
+            return None, None
+
+        product_map = {f.stem.replace("best_", ""): str(f) for f in weight_files}
+        product_names = list(product_map.keys())
+
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setLabelText(label)
+        dialog.setComboBoxItems(product_names)
+        dialog.resize(550, 280)
+
+        dialog.setStyleSheet("""
+            QInputDialog { background-color: #00052c; }
+            QLabel { color: #ffffff; font: bold 16pt "Arial"; padding-bottom: 8px; }
+            QComboBox { background-color: #ffffff; color: #000000; font: bold 16pt "Arial"; border: 2px solid #0077c4; border-radius: 6px; padding: 8px; min-height: 45px; }
+            QComboBox QAbstractItemView { background-color: #ffffff; color: #000000; font: bold 14pt "Arial"; selection-background-color: #0077c4; selection-color: #ffffff; }
+            QPushButton { background-color: #0077c4; color: #ffffff; font: bold 15pt "Arial"; border: 1px solid #000000; border-radius: 6px; min-width: 120px; min-height: 45px; }
+            QPushButton:pressed { background-color: #005096; }
+        """)
+
+        if dialog.exec_() == QDialog.Accepted and dialog.textValue():
+            selected_product = dialog.textValue()
+            return selected_product, product_map[selected_product]
+            
+        return None, None
         
     def robot_alarm_reset_button(self):
         try:
@@ -608,14 +669,37 @@ class PPAPUI(QMainWindow):
         self.vision.set_visualize(False)
 
     def vision_start(self):
-        """객체 탐지 시작 + 화면 표시"""
-        print("[UI] vision_start")
+        """객체 탐지 시작 + 화면 표시 (작업 중이면 현재 모델 유지, 아니면 팝업 선택)"""
+        
+        # ⭐ 1. 자동 작업 중(is_auto_running)이고 기존에 로드된 모델이 있다면 팝업 생략
+        if self.is_auto_running and hasattr(self, 'current_model_path') and self.current_model_path:
+            product_name = getattr(self, 'current_product_name', '활성 제품')
+            selected_path = self.current_model_path
+            print(f"[UI] 🔄 로봇 작업 진행 중: 현재 활성 모델('{product_name}')을 유지하여 비전을 시작합니다.")
+        else:
+            # ⭐ 2. 대기 상태일 때는 대형 고대비 팝업창을 띄워 제품 선택
+            product_name, selected_path = self.select_product_model(
+                title="비전 탐지 모델 선택",
+                label="실시간 비전 검출(미리보기)을 테스트할 제품을 선택하세요:"
+            )
+
+            if not selected_path:
+                print("[INFO] 제품 선택이 취소되어 비전 탐지를 시작하지 않습니다.")
+                return
+
+            # 새로 선택한 모델 정보를 활성 모델로 갱신
+            self.current_product_name = product_name
+            self.current_model_path = selected_path
+
+        print(f"[UI] ▶️ '{product_name}' 제품 모델로 비전 탐지(미리보기)를 시작합니다.")
+        
+        # 선택된 모델로 즉시 교체 및 신뢰도 업데이트
+        self.vision.change_target_model(selected_path)
+        self.vision.update_confidence()
 
         self.ui_vision_enabled = True
-
         if not self.vision.worker.isRunning():
             self.vision.start_camera()
-
         self.vision.set_visualize(True)
         
     def vision_stop(self):
@@ -675,33 +759,6 @@ class PPAPUI(QMainWindow):
         except Exception as e:
             print("[VISION UI ERROR]", e) 
             
-    def refresh_model_list(self):
-        """학습 완료된 best_*.pt 파일들을 찾아 콤보박스에 로드"""
-        try:
-            self.ui.product_combo.clear()
-            
-            # 가중치가 저장된 루트 폴더 경로 지정 (프로젝트 환경에 맞게 수정 필요)
-            weight_root = APP_ROOT / "VISION/data/runs_seg"
-            if not weight_root.exists():
-                print("[WARN] 가중치 폴더가 존재하지 않습니다:", weight_root)
-                return
-                
-            # best_*.pt 파일 탐색
-            weight_files = list(weight_root.rglob("best_*.pt"))
-            
-            for pt_file in weight_files:
-                # 파일명에서 'best_'와 '.pt'를 제거하여 제품명만 추출 (예: best_black_cassette.pt -> black_cassette)
-                product_name = pt_file.stem.replace("best_", "")
-                # 콤보박스 화면에는 제품명을 표시하고, 내부 Data로는 실제 pt 파일 경로를 저장
-                self.ui.product_combo.addItem(product_name, str(pt_file))
-                
-            if self.ui.product_combo.count() == 0:
-                self.ui.product_combo.addItem("학습된 모델 없음", "")
-            else:
-                print(f"[INFO] 총 {self.ui.product_combo.count()}개의 제품 모델을 로드했습니다.")
-                
-        except Exception as e:
-            print(f"[ERROR] 모델 목록 로드 실패: {e}")
         
     @pyqtSlot()
     def on_robot_disconnected(self):
@@ -884,6 +941,9 @@ class PPAPUI(QMainWindow):
 
             self.db_manager.insert_vision(setting_name, value)
             print(f"[DB] {setting_name} saved:", value)
+            
+            if setting_name == "vision_reliability":
+                self.vision.update_confidence()
 
             self.show_message(
                 title="저장 완료",
@@ -1967,37 +2027,24 @@ class PPAPUI(QMainWindow):
                 QMessageBox.warning(self, "데이터 없음", "로봇 좌표 데이터가 없습니다.\n초기화 후 다시 시도하세요.")
                 return
             
-            # ⭐ 1. 가중치 저장 폴더에서 best_*.pt 파일 탐색
-            weight_root = APP_ROOT / "VISION/data/runs_seg"
-            weight_files = list(weight_root.rglob("best_*.pt")) if weight_root.exists() else []
-            
-            if not weight_files:
-                QMessageBox.warning(self, "모델 오류", "학습된 단독 모델(best_*.pt)을 찾을 수 없습니다.\n먼저 AI 학습을 진행해주세요.")
-                return
-
-            # 파일명에서 'best_'와 '.pt'를 제외한 제품명 맵핑 (예: best_black_cassette.pt -> black_cassette)
-            product_map = {f.stem.replace("best_", ""): str(f) for f in weight_files}
-            product_names = list(product_map.keys())
-
-            # ⭐ 2. QInputDialog를 통해 작업자에게 피킹할 제품 선택 받기
-            selected_product, ok = QInputDialog.getItem(
-                self, 
-                "작업 제품 선택", 
-                "피킹 작업을 진행할 제품을 선택하세요:", 
-                product_names, 
-                0, 
-                False
+            # ─────────────────────────────────────────────────────
+            # [수정] 공통 팝업 메서드를 호출하여 작업할 제품 선택
+            # ─────────────────────────────────────────────────────
+            selected_product, selected_model_path = self.select_product_model(
+                title="작업 제품 선택",
+                label="피킹 작업을 진행할 제품을 선택하세요:"
             )
 
-            # 취소 버튼을 누르거나 선택하지 않은 경우 작업 시작 취소
-            if not ok or not selected_product:
+            if not selected_model_path:
                 print("[INFO] 제품 선택이 취소되어 작업을 시작하지 않습니다.")
                 return
 
-            selected_model_path = product_map[selected_product]
             print(f"[INFO] 선택된 제품: '{selected_product}' (모델 경로: {selected_model_path})")
             
-            # ⭐ 3. 비전 시스템(Worker)에 선택된 단독 모델 적용
+            self.current_product_name = selected_product
+            self.current_model_path = selected_model_path
+            
+            # 비전 시스템에 모델 적용
             self.vision.change_target_model(selected_model_path)
 
             # 1. 상태 잠금 (가장 먼저)

@@ -26,8 +26,8 @@ class RobotDB:
         self._init_db()
 
     def _get_connection(self):
-        print("DB_PATH =", self.db_path)
-        print("EXISTS =", Path(self.db_path).exists())
+        # print("DB_PATH =", self.db_path)
+        # print("EXISTS =", Path(self.db_path).exists())
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn

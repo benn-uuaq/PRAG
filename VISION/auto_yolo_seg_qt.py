@@ -44,13 +44,13 @@ if getattr(sys, "frozen", False):
     WEIGHT_PATH  = PROJECT_ROOT / "VISION/runs_seg"
     BASE_MODEL   = PROJECT_ROOT / "VISION/config/yolo11n-seg.pt"
 else:
-    SHAPE_DB_DIR = PROJECT_ROOT / "PRAG_260721_test/VISION/data/template"
-    BACKGROUND_DIR = PROJECT_ROOT / "PRAG_260721_test/VISION/data/backgrounds"
+    SHAPE_DB_DIR = PROJECT_ROOT / "PRAG/VISION/data/template"
+    BACKGROUND_DIR = PROJECT_ROOT / "PRAG/VISION/data/backgrounds"
     
-    ROI_YAML     = PROJECT_ROOT / "PRAG_260721_test/VISION/config/roi_config.yaml"
-    DATASET_DIR  = PROJECT_ROOT / "PRAG_260721_test/VISION/data/dataset_seg"
-    WEIGHT_PATH  = PROJECT_ROOT / "PRAG_260721_test/VISION/runs_seg"
-    BASE_MODEL   = PROJECT_ROOT / "PRAG_260721_test/VISION/config/yolo11n-seg.pt"
+    ROI_YAML     = PROJECT_ROOT / "PRAG/VISION/config/roi_config.yaml"
+    DATASET_DIR  = PROJECT_ROOT / "PRAG/VISION/data/dataset_seg"
+    WEIGHT_PATH  = PROJECT_ROOT / "PRAG/VISION/runs_seg"
+    BASE_MODEL   = PROJECT_ROOT / "PRAG/VISION/config/yolo11n-seg.pt"
 
 IMG_TRAIN = DATASET_DIR / "images/train"
 IMG_VAL   = DATASET_DIR / "images/val"
@@ -163,7 +163,7 @@ class YoloTrainWorker(QThread):
                 target_device = "cpu"
                 train_batch = 8        # CPU 메모리 및 연산 부하 완화를 위해 8로 하향
                 train_workers = 0      # CPU 환경에서는 0으로 해야 멀티프로세싱 병목 없음
-                self.log.emit("[SYSTEM] 🟡 GPU가 없습니다. (고객사 CPU 전용 학습 모드)")
+                self.log.emit("[SYSTEM] 🟡 GPU가 없습니다. (CPU 전용 학습 모드)")
 
             roi = load_roi()
             templates, _ = load_templates(self.selected_classes)

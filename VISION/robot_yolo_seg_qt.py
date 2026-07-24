@@ -1,5 +1,3 @@
-
-
 import sys
 import yaml
 import numpy as np
@@ -13,19 +11,22 @@ def project_root() -> Path:
         return Path(sys.executable).resolve().parent
     else:
         return Path(__file__).resolve().parent.parent.parent
+
 PROJECT_ROOT = project_root()
 
 if getattr(sys, "frozen", False):
-    WEIGHT_PATH = PROJECT_ROOT / "VISION" / "runs_seg" / "segment" / "train" / "weights" / "best.pt"
-    HANDEYE_YAML = PROJECT_ROOT / "VISION" / "config" / "aruco_rigid_result.yaml"
+    # ⭐ 단일 best.pt 경로 대신 runs_seg 폴더 전체를 참조하도록 수정
+    WEIGHT_DIR      = PROJECT_ROOT / "VISION" / "runs_seg"
+    HANDEYE_YAML    = PROJECT_ROOT / "VISION" / "config" / "aruco_rigid_result.yaml"
     INTRINSICS_YAML = PROJECT_ROOT / "VISION" / "config" / "calibration_intrinsics.yaml"
 else:
-    WEIGHT_PATH = PROJECT_ROOT / "PRAG" / "VISION" / "runs_seg" / "segment" / "train" / "weights" / "best.pt"
-    HANDEYE_YAML = PROJECT_ROOT / "PRAG" / "VISION" / "config" / "aruco_rigid_result.yaml"
+    WEIGHT_DIR      = PROJECT_ROOT / "PRAG" / "VISION" / "runs_seg"
+    HANDEYE_YAML    = PROJECT_ROOT / "PRAG" / "VISION" / "config" / "aruco_rigid_result.yaml"
     INTRINSICS_YAML = PROJECT_ROOT / "PRAG" / "VISION" / "config" / "calibration_intrinsics.yaml"
 
 
 from VISION.yolo_object_segmentation_qt import YOLOSegDetector, load_roi_from_yaml
+
 # ------------------------------------------------------------
 #  Hand–Eye 로드
 # ------------------------------------------------------------
@@ -51,18 +52,24 @@ def cam_to_base(cam_xyz: np.ndarray, T_base_cam: np.ndarray) -> np.ndarray:
     base_h = T_base_cam @ cam_h
     return base_h[:3]
 
+
 class YOLOToRobot:
     def __init__(self,
-                 weight_path=WEIGHT_PATH,
+                 weight_path=None,
                  handeye_yaml=HANDEYE_YAML,
                  intrinsics_yaml=INTRINSICS_YAML,
                  use_external_frames=False):
         self.detector = YOLOSegDetector(
-            weight_path,
-            intrinsics_yaml,
+            weight_path=weight_path,
+            intrinsics_yaml=intrinsics_yaml,
             roi=load_roi_from_yaml()
         )
+        self.handeye_yaml = handeye_yaml
         self.T_base_cam = load_base_T_cam(handeye_yaml)
+
+    def set_model(self, weight_path):
+        """하위 YOLOSegDetector 검출기의 모델 동적 교체"""
+        return self.detector.set_model(weight_path)
 
     def detect_from_frames(self, color, depth, depth_scale):
         detections, img = self.detector.detect_from_frames(
@@ -92,25 +99,21 @@ class YOLOToRobot:
 
         return result, base_xyz, img
 
-    
     def select_top_object(self, objs):
         """
         objs: list of detection dicts
         return: best object or None
         """
-
         if not objs:
             return None
 
         scored = []
         for o in objs:
-            # depth
             center = o.get("center_xyz", None)
             if center is None or len(center) != 3:
                 continue
             z = center[2]
 
-            # mask_area (없으면 계산 or 0)
             if "mask_area" in o:
                 area = o["mask_area"]
             elif "mask" in o and o["mask"] is not None:
@@ -118,13 +121,12 @@ class YOLOToRobot:
             else:
                 area = 0
 
-            # confidence
             conf = o.get("confidence", 0.0)
 
             score = (
                 -100.0 * z +        # depth 최우선
-                0.0001 * area +    # 보이는 면적
-                0.1 * conf        # confidence 보조
+                0.0001 * area +     # 보이는 면적
+                0.1 * conf          # confidence 보조
             )
 
             scored.append((score, o))
@@ -144,14 +146,18 @@ class YOLOToRobotQt:
 
     def __init__(
         self,
-        weight_path: Path = WEIGHT_PATH,
+        weight_path: Path = None,
         handeye_yaml: Path = HANDEYE_YAML,
         intrinsics_yaml: Path = INTRINSICS_YAML
     ):
+        self.current_weight_path = weight_path
+        self.handeye_yaml = handeye_yaml
+        self.intrinsics_yaml = intrinsics_yaml
+
         self.yolo_robot = YOLOToRobot(
-            weight_path=weight_path,
-            handeye_yaml=handeye_yaml,
-            intrinsics_yaml=intrinsics_yaml
+            weight_path=self.current_weight_path,
+            handeye_yaml=self.handeye_yaml,
+            intrinsics_yaml=self.intrinsics_yaml
         )
 
         self.last_result = None
@@ -159,6 +165,17 @@ class YOLOToRobotQt:
         self.last_image = None
 
         print("[VISION][QT] YOLOToRobotQt initialized")
+        
+    def update_confidence(self):
+        """DB에서 신뢰도 값을 다시 읽어와 감지기에 반영"""
+        if hasattr(self, 'yolo_robot') and hasattr(self.yolo_robot, 'detector'):
+            self.yolo_robot.detector.update_confidence()
+            print("[VISION][QT] 비전 신뢰도(Confidence) 갱신 완료")
+
+    def change_target_model(self, weight_path):
+        """⭐ 메인 UI에서 선택한 레시피(모델 경로)를 비전 시스템에 적용"""
+        self.current_weight_path = weight_path
+        return self.yolo_robot.set_model(weight_path)
 
     # --------------------------------------------------
     # 1️⃣ 실시간 시각화 전용 (좌표 계산 ❌)
@@ -201,23 +218,21 @@ class YOLOToRobotQt:
             print("[VISION][QT][ERROR] detect_once failed:", e)
             self._clear_last()
             return False, None, None, None
-        
+
     def reload_config(self):
         """
-        [핵심 추가] 변경된 YAML 파일(ROI, Intrinsics, HandEye)을 다시 로드하여 적용
+        [핵심 수정] 설정 재로드 시 현재 작업자가 선택해 둔 모델(current_weight_path)을 유지함
         """
         print("[VISION][QT] Reloading configuration files...")
         try:
-            # 1. YOLOToRobot 객체 재생성 (내부에서 파일 다시 읽음)
             self.yolo_robot = YOLOToRobot(
-                weight_path=WEIGHT_PATH,
-                handeye_yaml=HANDEYE_YAML,
-                intrinsics_yaml=INTRINSICS_YAML
+                weight_path=self.current_weight_path,
+                handeye_yaml=self.handeye_yaml,
+                intrinsics_yaml=self.intrinsics_yaml
             )
             print("[VISION][QT] Configuration reloaded successfully.")
         except Exception as e:
             print(f"[VISION][QT][ERROR] Config reload failed: {e}")
-
 
     # --------------------------------------------------
     # 내부 상태

@@ -20,7 +20,12 @@ class VisionMain(QObject):
 
         # Worker → UI 프레임 전달
         self.worker.frame_signal.connect(self.frame_signal.emit)
-
+        
+    def update_confidence(self):
+        """VisionWorker의 신뢰도 갱신 전달"""
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.update_confidence()
+            
     # --------------------------------------------------
     # 카메라 제어
     # --------------------------------------------------

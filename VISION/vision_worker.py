@@ -28,6 +28,11 @@ class VisionWorker(QThread):
         self.yolo_qt = YOLOToRobotQt()
         
         print("[VISION WORKER] Initialized with YOLO")
+        
+    def update_confidence(self):
+        """YOLOQt 래퍼의 신뢰도 갱신 메서드 호출"""
+        if hasattr(self, 'yolo_qt') and self.yolo_qt:
+            self.yolo_qt.update_confidence()
 
     def run(self):
         """카메라 스트림 시작 (무한 루프)"""
