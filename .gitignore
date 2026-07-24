@@ -1,0 +1,9 @@
+# 학습 산출물 (매 학습마다 갱신되어 커밋 대상에서 제외)
+VISION/runs_seg/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 데이터셋 캐시 (ultralytics가 자동 생성)
+*.cache
