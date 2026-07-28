@@ -192,15 +192,17 @@ class VisionWorker(QThread):
         """
         self.mutex.lock()
         try:
-            # YOLOToRobotQt 객체 내부에 가중치를 변경하는 로직 호출
-            if hasattr(self.yolo_qt, "load_model"):
-                self.yolo_qt.load_model(model_path)
+            # ⭐ [수정] YOLOToRobotQt에 실제로 존재하는 change_target_model()을 호출.
+            # 예전엔 없는 load_model()을 hasattr로 찾다 실패하고, 존재하지도 않는
+            # weight_path 속성에 값을 넣은 뒤 reload_config()를 호출해서
+            # (reload_config는 current_weight_path를 사용하므로) 실제로는 모델이
+            # 전혀 바뀌지 않는 버그가 있었음.
+            ok = self.yolo_qt.change_target_model(str(model_path))
+
+            if ok:
+                print(f"[VISION WORKER] 모델 교체 완료: {model_path}")
             else:
-                # 기존 객체의 가중치 경로 변수를 덮어쓰고 설정 리로드
-                self.yolo_qt.weight_path = str(model_path)
-                self.yolo_qt.reload_config()
-                
-            print(f"[VISION WORKER] 모델 교체 완료: {model_path}")
+                print(f"[VISION WORKER ERROR] 모델 교체 실패(로드 거부됨): {model_path}")
         except Exception as e:
             print(f"[VISION WORKER ERROR] 모델 교체 실패: {e}")
         finally:

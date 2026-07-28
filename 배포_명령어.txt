@@ -1,1 +1,42 @@
-pyinstaller --noconfirm --clean --onedir --windowed --name PRAG_260609 --icon logo.ico --add-data "VISION;VISION" --add-data "UI;UI" --add-data "DB;DB" --add-data "IO;IO" --add-data "ROBOT_CONTROL;ROBOT_CONTROL" --exclude-module PySide6 ppap_main.py
+pyinstaller --noconfirm --onedir --windowed --noupx `
+  --name PRAG_260727 --icon logo.ico `
+  --contents-directory . `
+  --runtime-hook "hook-torch-first.py" `
+  --add-data "VISION;VISION" `
+  --add-data "UI;UI" `
+  --add-data "DB;DB" `
+  --add-data "IO;IO" `
+  --add-data "ROBOT_CONTROL;ROBOT_CONTROL" `
+  --collect-all torch `
+  --exclude-module PySide6 `
+  --exclude-module matplotlib `
+  --exclude-module tkinter `
+  --exclude-module tensorboard `
+  --exclude-module IPython `
+  --exclude-module fastapi `
+  --exclude-module starlette `
+  --exclude-module pydantic.experimental `
+  --exclude-module jax `
+  --exclude-module jaxlib `
+  --exclude-module mujoco `
+  --exclude-module open3d `
+  --exclude-module mediapipe `
+  --exclude-module transformers `
+  --exclude-module bitsandbytes `
+  --exclude-module easyocr `
+  --exclude-module moondream `
+  --exclude-module kestrel `
+  --exclude-module clip `
+  --exclude-module timm `
+  --exclude-module accelerate `
+  --exclude-module graspnetAPI `
+  --exclude-module PyBoof `
+  --exclude-module trimesh `
+  --exclude-module transforms3d `
+  --exclude-module seaborn `
+  --exclude-module shapely `
+  --exclude-module sklearn `
+  --exclude-module skimage `
+  --exclude-module tifffile `
+  --exclude-module albumentations `
+  ppap_main.py

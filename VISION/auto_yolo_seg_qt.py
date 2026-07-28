@@ -228,61 +228,101 @@ class YoloTrainWorker(QThread):
 
                     self.log.emit(f"[DATA] '{cls}' 합성 이미지 생성 중... (총 {IMAGES_PER_CLASS}장)")
 
+                    # ⭐ 배경 구성 비율 (예전 버전 PRAG_260609 비율로 복원, 총 200장)
+                    # 예전(100장 기준): 화이트20:블랙20:실배경30:템플릿30 = 2:2:3:3
+                    # 순수 배경(네거티브)은 예전엔 없던 개념이라 10장만 별도로 유지하고,
+                    # 나머지 190장을 예전과 동일한 2:2:3:3 비율로 배분(19장 단위 x 2/2/3/3)
+                    NEG_COUNT = 10
+                    WHITE_COUNT = 38   # 19 x 2
+                    BLACK_COUNT = 38   # 19 x 2
+                    REAL_COUNT = 57    # 19 x 3
+                    TEMPLATE_COUNT = 57  # 19 x 3
+                    # NEG_COUNT + WHITE_COUNT + BLACK_COUNT + REAL_COUNT + TEMPLATE_COUNT == IMAGES_PER_CLASS(200)
+
+                    NEG_END = NEG_COUNT
+                    TEMPLATE_END = NEG_END + TEMPLATE_COUNT
+                    REAL_END = TEMPLATE_END + REAL_COUNT
+                    WHITE_END = REAL_END + WHITE_COUNT
+                    # BLACK_END = WHITE_END + BLACK_COUNT (== IMAGES_PER_CLASS)
+
+                    def pick_negative_background():
+                        """순수 배경(네거티브) 이미지용 배경 — 템플릿 텍스처는 제외하고
+                        실제 배경 사진/화이트/블랙 중에서만 고른다.
+                        (템플릿 텍스처를 '물체 없음'으로 라벨링하면 모델이
+                        제품 텍스처=배경으로 잘못 학습할 위험이 있음)"""
+                        choice = random.choice(["real", "white", "black"])
+                        if choice == "real" and real_backgrounds:
+                            bg_path = random.choice(real_backgrounds)
+                            bg_img = cv2.imread(str(bg_path))
+                            if bg_img is not None:
+                                return cv2.resize(bg_img, (W, H))
+                        if choice == "black":
+                            return np.zeros((H, W, 3), dtype=np.uint8)
+                        return np.full((H, W, 3), 255, dtype=np.uint8)
+
                     # 2. 합성 이미지 및 라벨 생성
                     for i in range(IMAGES_PER_CLASS):
                         if not self._is_running: break
 
-                        if i < 20:   # 화이트
-                            bg = np.full((H, W, 3), 255, dtype=np.uint8)
-                        elif i < 40: # 블랙
-                            bg = np.zeros((H, W, 3), dtype=np.uint8)
-                        elif i < 70: # 실제 촬영 배경
+                        is_negative = i < NEG_END
+
+                        if is_negative:
+                            bg = pick_negative_background()
+                        elif i < TEMPLATE_END:  # 템플릿 배경
+                            t_rgba, _ = random.choice(tmpl_list)
+                            bg = cv2.resize(t_rgba[:, :, :3], (W, H))
+                        elif i < REAL_END:  # 실제 촬영 배경
                             if real_backgrounds:
                                 bg_path = random.choice(real_backgrounds)
                                 bg_img = cv2.imread(str(bg_path))
                                 bg = cv2.resize(bg_img, (W, H)) if bg_img is not None else np.full((H, W, 3), 255, dtype=np.uint8)
                             else:
                                 bg = np.full((H, W, 3), 255, dtype=np.uint8)
-                        else:        # 템플릿 배경
-                            t_rgba, _ = random.choice(tmpl_list)
-                            bg = cv2.resize(t_rgba[:, :, :3], (W, H))
+                        elif i < WHITE_END:  # 화이트
+                            bg = np.full((H, W, 3), 255, dtype=np.uint8)
+                        else:  # 블랙
+                            bg = np.zeros((H, W, 3), dtype=np.uint8)
 
-                        masks = []
-                        for _ in range(random.randint(15, 30)):
-                            rgba, hard = random.choice(tmpl_list)
-                            h_obj, w_obj = rgba.shape[:2]
-                            
-                            safe_x = max(roi[0], roi[2] - w_obj)
-                            safe_y = max(roi[1], roi[3] - h_obj)
-                            x = random.randint(roi[0], safe_x)
-                            y = random.randint(roi[1], safe_y)
-
-                            alpha = rgba[:, :, 3:4] / 255.0
-                            bg_roi = bg[y:y+h_obj, x:x+w_obj]
-                            if bg_roi.shape[:2] != (h_obj, w_obj): continue 
-
-                            bg[y:y+h_obj, x:x+w_obj] = (rgba[:, :, :3] * alpha + bg_roi * (1 - alpha)).astype(np.uint8)
-
-                            mask = np.zeros((H, W), np.uint8)
-                            mask[y:y+h_obj, x:x+w_obj] = hard
-                            masks.append(mask)
-
-                        # ⭐ 단독 모델이므로 무조건 클래스 ID는 0번 고정!
                         labels = []
-                        front = np.zeros((H, W), np.uint8)
 
-                        for m in reversed(masks):
-                            vis = m.copy()
-                            vis[front > 0] = 0 
-                            if np.count_nonzero(vis) / max(1, np.count_nonzero(m)) < 0.7: continue
+                        if not is_negative:
+                            masks = []
+                            for _ in range(random.randint(15, 30)):
+                                rgba, hard = random.choice(tmpl_list)
+                                h_obj, w_obj = rgba.shape[:2]
 
-                            poly = mask_to_polygon(vis, W, H)
-                            if poly:
-                                labels.append("0 " + " ".join(map(str, poly)))
-                                front[m > 0] = 1
+                                safe_x = max(roi[0], roi[2] - w_obj)
+                                safe_y = max(roi[1], roi[3] - h_obj)
+                                x = random.randint(roi[0], safe_x)
+                                y = random.randint(roi[1], safe_y)
 
-                        if not labels: continue
+                                alpha = rgba[:, :, 3:4] / 255.0
+                                bg_roi = bg[y:y+h_obj, x:x+w_obj]
+                                if bg_roi.shape[:2] != (h_obj, w_obj): continue
 
+                                bg[y:y+h_obj, x:x+w_obj] = (rgba[:, :, :3] * alpha + bg_roi * (1 - alpha)).astype(np.uint8)
+
+                                mask = np.zeros((H, W), np.uint8)
+                                mask[y:y+h_obj, x:x+w_obj] = hard
+                                masks.append(mask)
+
+                            # ⭐ 단독 모델이므로 무조건 클래스 ID는 0번 고정!
+                            front = np.zeros((H, W), np.uint8)
+
+                            for m in reversed(masks):
+                                vis = m.copy()
+                                vis[front > 0] = 0
+                                if np.count_nonzero(vis) / max(1, np.count_nonzero(m)) < 0.7: continue
+
+                                poly = mask_to_polygon(vis, W, H)
+                                if poly:
+                                    labels.append("0 " + " ".join(map(str, poly)))
+                                    front[m > 0] = 1
+
+                            # 포지티브 이미지인데 라벨이 하나도 안 만들어졌으면 스킵 (기존 동작 유지)
+                            if not labels: continue
+
+                        # 네거티브 이미지는 labels가 빈 리스트인 채로 그대로 저장 (빈 라벨 파일 = "이 이미지엔 물체 없음")
                         is_val = (i % 5 == 0)
                         cv2.imwrite(str((img_val if is_val else img_train) / f"{i:06d}.jpg"), bg)
                         with open((lbl_val if is_val else lbl_train) / f"{i:06d}.txt", "w") as f:

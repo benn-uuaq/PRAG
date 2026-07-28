@@ -1,3 +1,6 @@
+# torch/torchvision은 CUDA 12.8 빌드. 아래 extra-index-url이 있어야 +cu128 wheel을 받아옴.
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 numpy==1.26.4
 opencv_contrib_python==4.8.1.78
 openpyxl==3.1.5
@@ -9,4 +12,6 @@ pyrealsense2==2.54.1.5217
 pytz==2025.2
 PyYAML==6.0.3
 scipy==1.16.3
+torch==2.11.0+cu128
+torchvision==0.28.0+cu128
 ultralytics==8.3.236

@@ -1,4 +1,14 @@
+import os
 import sys
+
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+    
+import torch
+from ultralytics import YOLO
+
 import ast
 import time
 import math
@@ -12,11 +22,6 @@ from pathlib import Path
 
 faulthandler.enable()
 
-# ⭐ [DLL 로딩 순서] torch는 PyQt5보다 먼저 import 되어야 함.
-# PyQt5가 먼저 로드되어 있으면 torch/lib/c10.dll 로딩 중 access violation 발생 확인됨.
-import torch  # noqa: F401
-from ultralytics import YOLO  # noqa: F401
-
 from PyQt5.QtWidgets import *
 from PyQt5 import QtGui
 from PyQt5 import QtCore
@@ -24,10 +29,10 @@ from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt, QMetaObject, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap
 
 PC_IP = "192.168.3.30"
-# ROBOT_IP = "192.168.2.202"
-ROBOT_IP = "192.168.227.134"
-# IO_IP = "192.168.1.150"
-IO_IP = "127.0.0.1"
+ROBOT_IP = "192.168.2.202"
+# ROBOT_IP = "192.168.227.134"
+IO_IP = "192.168.1.150"
+# IO_IP = "127.0.0.1"
 IO_PORT = 502
 
 Z_LIMIT = 0.055 # 단위: m
@@ -366,9 +371,9 @@ class PPAPUI(QMainWindow):
         self.is_fk_calculating = False
 
         self.job_thread = None
-        
+
         self.is_auto_running = False
-        
+
         self.power = False
         self.running = False
         self.speed = 0
@@ -1718,7 +1723,14 @@ class PPAPUI(QMainWindow):
                     if di_values and len(di_values) > 8 and di_values[self.io.plc_work_done] == 1:
                         print("[INFO] 외부 PLC 작업 수량 도달(정지) 신호 감지(8번 핀) → 작업을 정지합니다.")
                         self.is_auto_running = False
+                        self.running = False  # ⭐ 하드웨어 상태 반영을 기다리지 않고 즉시 "전원 켜짐"으로 표시
                         self.robot_send.robot_stop()
+                        # ⭐ 이 코드는 JobThread(백그라운드 스레드)에서 실행되므로,
+                        # UI 갱신(robot_status_update)은 반드시 QMetaObject.invokeMethod로
+                        # 메인(GUI) 스레드에 안전하게 넘겨서 호출해야 함.
+                        QMetaObject.invokeMethod(
+                            self, "robot_status_update", Qt.QueuedConnection
+                        )
                         break
                 except Exception as e:
                     print(f"[WARN] PLC 정지 신호 확인 중 오류 발생: {e}")
@@ -1895,6 +1907,7 @@ class PPAPUI(QMainWindow):
         self.robot_status = status
         self.robot_status_initialized = True
 
+    @pyqtSlot()
     def robot_status_update(self):
         if not getattr(self, "robot_status_initialized", False):
             return
@@ -2086,7 +2099,8 @@ class PPAPUI(QMainWindow):
             print("[INFO] 로봇 정지")
 
             self.is_auto_running = False
-            
+            self.running = False  # ⭐ 하드웨어 상태 반영을 기다리지 않고 즉시 "전원 켜짐"으로 표시
+
             self.robot_send.robot_stop()
 
             self.ui.start_button.setEnabled(True)

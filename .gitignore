@@ -1,9 +1,9 @@
-# 학습 산출물 (매 학습마다 갱신되어 커밋 대상에서 제외)
-VISION/runs_seg/
+# PyInstaller 빌드 산출물 (수 GB, 매번 재빌드로 재생성됨 - 절대 커밋 금지)
+build/
+dist/
 
-# 파이썬 캐시
-__pycache__/
-*.pyc
+# PyInstaller가 빌드 시마다 배포_명령어.txt 옵션 기준으로 자동 재생성함
+*.spec
 
-# 데이터셋 캐시 (ultralytics가 자동 생성)
-*.cache
+# 학습용 합성 이미지 (학습 실행 시마다 자동 재생성되는 임시 데이터)
+VISION/data/dataset_seg/
