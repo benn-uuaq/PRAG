@@ -1,6 +1,9 @@
 # torch/torchvision은 CUDA 12.8 빌드. 아래 extra-index-url이 있어야 +cu128 wheel을 받아옴.
 --extra-index-url https://download.pytorch.org/whl/cu128
 
+# matplotlib은 직접 쓰지 않지만 ultralytics가 check_font()에서 내부적으로 import함.
+# 빠지면 학습 시작 시 ModuleNotFoundError -> "Dataset ... error"로 위장되어 나타남.
+matplotlib==3.9.2
 numpy==1.26.4
 opencv_contrib_python==4.8.1.78
 openpyxl==3.1.5

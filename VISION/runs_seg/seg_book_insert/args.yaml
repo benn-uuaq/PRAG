@@ -2,14 +2,14 @@ task: segment
 mode: train
 model: D:\6.  Project\PRAG\PRAG\VISION\config\yolo11n-seg.pt
 data: D:\6.  Project\PRAG\PRAG\VISION\data\dataset_seg\book_insert\dataset_book_insert.yaml
-epochs: 10
+epochs: 20
 time: null
 patience: 5
 batch: 16
 imgsz: 640
 save: true
 save_period: -1
-cache: false
+cache: true
 device: '0'
 workers: 2
 project: D:\6.  Project\PRAG\PRAG\VISION\runs_seg
@@ -25,7 +25,7 @@ rect: false
 cos_lr: false
 close_mosaic: 10
 resume: false
-amp: true
+amp: false
 fraction: 1.0
 profile: false
 freeze: null
@@ -42,7 +42,7 @@ iou: 0.7
 max_det: 300
 half: false
 dnn: false
-plots: true
+plots: false
 source: null
 vid_stride: 1
 stream_buffer: false
@@ -94,7 +94,7 @@ perspective: 0.0
 flipud: 0.0
 fliplr: 0.5
 bgr: 0.0
-mosaic: 1.0
+mosaic: 0.0
 mixup: 0.0
 cutmix: 0.0
 copy_paste: 0.0

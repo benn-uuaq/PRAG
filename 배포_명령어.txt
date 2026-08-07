@@ -1,5 +1,5 @@
 pyinstaller --noconfirm --onedir --windowed --noupx `
-  --name PRAG_260727 --icon logo.ico `
+  --name PRAG_260805 --icon logo.ico `
   --contents-directory . `
   --runtime-hook "hook-torch-first.py" `
   --add-data "VISION;VISION" `
@@ -9,7 +9,6 @@ pyinstaller --noconfirm --onedir --windowed --noupx `
   --add-data "ROBOT_CONTROL;ROBOT_CONTROL" `
   --collect-all torch `
   --exclude-module PySide6 `
-  --exclude-module matplotlib `
   --exclude-module tkinter `
   --exclude-module tensorboard `
   --exclude-module IPython `

@@ -3,6 +3,7 @@ import torch
 import sys
 import cv2
 import yaml
+import json
 import numpy as np
 import random
 import shutil
@@ -58,8 +59,21 @@ LBL_TRAIN = DATASET_DIR / "labels/train"
 LBL_VAL   = DATASET_DIR / "labels/val"
 DATA_YAML = DATASET_DIR / "dataset.yaml"
 
-# ✅ 총 200장 생성
-IMAGES_PER_CLASS = 200
+# ✅ 클래스당 합성 이미지 장수
+# 이미지 1장에 오브젝트를 15~30개 합성하므로 80장이면 단일 클래스 인스턴스가 1,600~2,400개.
+# 제품별 단독 모델(1 클래스) + 고정 카메라/ROI 환경이라 이 정도면 충분하며,
+# CPU 학습 시간을 크게 줄일 수 있음. (기존 200장)
+IMAGES_PER_CLASS = 80
+
+# 학습 epoch (장수를 줄인 대신 소폭 상향)
+EPOCHS_CPU = 12
+EPOCHS_GPU = 20
+
+# CPU 학습 시 backbone 동결 레이어 수 (역전파 비용 감소, 단일 클래스에선 성능 손실 미미)
+FREEZE_LAYERS_CPU = 10
+
+# 검증 분할 비율: N장마다 1장을 val로 사용 (5 -> 10, 즉 20% -> 10%)
+VAL_EVERY = 10
 
 # ==============================
 # StreamRedirect (로그 가로채기)
@@ -158,11 +172,15 @@ class YoloTrainWorker(QThread):
                 target_device = 0
                 train_batch = 16       # VRAM OOM 방지를 위해 32 -> 16으로 하향
                 train_workers = 2      # 윈도우 핀메모리 에러 방지 (4 -> 2)
+                train_epochs = EPOCHS_GPU
+                train_freeze = None    # GPU는 여유가 있으므로 전체 레이어 학습
                 self.log.emit("[SYSTEM] 🟢 GPU가 감지되었습니다. (CUDA GPU 학습 모드)")
             else:
                 target_device = "cpu"
                 train_batch = 8        # CPU 메모리 및 연산 부하 완화를 위해 8로 하향
                 train_workers = 0      # CPU 환경에서는 0으로 해야 멀티프로세싱 병목 없음
+                train_epochs = EPOCHS_CPU
+                train_freeze = FREEZE_LAYERS_CPU   # backbone 동결로 학습 시간 단축
                 self.log.emit("[SYSTEM] 🟡 GPU가 없습니다. (CPU 전용 학습 모드)")
 
             roi = load_roi()
@@ -198,28 +216,39 @@ class YoloTrainWorker(QThread):
                 self.log.emit(f"[YOLO] ({current_cls_idx}/{total_classes}) '{cls}' 제품 단독 모델 작업 시작")
                 self.log.emit(f"==================================================")
 
-                # 1. 제품별 임시 데이터셋 폴더 생성
+                # 1. 제품별 데이터셋 폴더 경로
                 cls_dataset_dir = DATASET_DIR / cls
-                if cls_dataset_dir.exists():
-                    shutil.rmtree(cls_dataset_dir)
 
                 img_train = cls_dataset_dir / "images/train"
                 img_val   = cls_dataset_dir / "images/val"
                 lbl_train = cls_dataset_dir / "labels/train"
                 lbl_val   = cls_dataset_dir / "labels/val"
 
-                # ⭐ [수정] 200장의 이미지가 모두 완벽히 생성되어 있는지 확실하게 검사
-                existing_img_count = len(list(img_train.glob("*.jpg"))) if img_train.exists() else 0
-                has_existing_data = (existing_img_count >= IMAGES_PER_CLASS)
+                # ⭐ 생성 완료 표식 파일로 재사용 여부를 판단한다.
+                #    (이미지 개수로 세면 라벨이 안 만들어져 스킵된 장수 때문에 항상 미달로 판정됨)
+                done_marker = cls_dataset_dir / "generated.json"
+                has_existing_data = False
+
+                if done_marker.exists():
+                    try:
+                        with open(done_marker, "r", encoding="utf-8") as f:
+                            _info = json.load(f)
+                        # 설정값(IMAGES_PER_CLASS)이 바뀌었으면 재생성해야 함
+                        if _info.get("images_per_class") == IMAGES_PER_CLASS:
+                            has_existing_data = True
+                        else:
+                            self.log.emit(
+                                f"[WARN] '{cls}' 생성 설정이 변경됨 "
+                                f"({_info.get('images_per_class')}장 -> {IMAGES_PER_CLASS}장). 재생성합니다."
+                            )
+                    except Exception:
+                        has_existing_data = False
 
                 if has_existing_data:
-                    # 200장 이상 완벽히 존재할 때만 보존 및 스킵
-                    self.log.emit(f"[INFO] '{cls}' 기존 데이터셋({existing_img_count}장)이 완벽히 보존되어 있어 이미지 생성을 건너뜁니다.")
+                    _cnt = len(list(img_train.glob("*.jpg"))) + len(list(img_val.glob("*.jpg")))
+                    self.log.emit(f"[INFO] '{cls}' 기존 데이터셋({_cnt}장)이 보존되어 있어 이미지 생성을 건너뜁니다.")
                 else:
-                    if existing_img_count > 0:
-                        self.log.emit(f"[WARN] '{cls}' 불완전한 데이터셋({existing_img_count}/{IMAGES_PER_CLASS}장) 감지. 폴더를 비우고 재생성합니다.")
-                        
-                    # 데이터가 없거나 200장 미만으로 불완전한 경우 폴더 초기화 및 새로 생성
+                    # 데이터가 없거나 설정이 바뀐 경우 폴더 초기화 및 새로 생성
                     if cls_dataset_dir.exists():
                         shutil.rmtree(cls_dataset_dir)
 
@@ -228,16 +257,19 @@ class YoloTrainWorker(QThread):
 
                     self.log.emit(f"[DATA] '{cls}' 합성 이미지 생성 중... (총 {IMAGES_PER_CLASS}장)")
 
-                    # ⭐ 배경 구성 비율 (예전 버전 PRAG_260609 비율로 복원, 총 200장)
-                    # 예전(100장 기준): 화이트20:블랙20:실배경30:템플릿30 = 2:2:3:3
-                    # 순수 배경(네거티브)은 예전엔 없던 개념이라 10장만 별도로 유지하고,
-                    # 나머지 190장을 예전과 동일한 2:2:3:3 비율로 배분(19장 단위 x 2/2/3/3)
-                    NEG_COUNT = 10
-                    WHITE_COUNT = 38   # 19 x 2
-                    BLACK_COUNT = 38   # 19 x 2
-                    REAL_COUNT = 57    # 19 x 3
-                    TEMPLATE_COUNT = 57  # 19 x 3
-                    # NEG_COUNT + WHITE_COUNT + BLACK_COUNT + REAL_COUNT + TEMPLATE_COUNT == IMAGES_PER_CLASS(200)
+                    # ⭐ 배경 구성 비율 (예전 버전 PRAG_260609 비율 유지)
+                    # 화이트:블랙:실배경:템플릿 = 2:2:3:3
+                    # 네거티브(순수 배경)는 전체의 약 5%를 별도로 배정하고,
+                    # 나머지를 위 비율대로 배분한다.
+                    # ⭐ IMAGES_PER_CLASS를 바꿔도 자동으로 맞춰지도록 비율 기반으로 계산
+                    NEG_COUNT = max(1, round(IMAGES_PER_CLASS * 0.05))
+                    _rest = IMAGES_PER_CLASS - NEG_COUNT
+                    _unit = _rest / 10.0
+                    WHITE_COUNT = round(_unit * 2)
+                    BLACK_COUNT = round(_unit * 2)
+                    REAL_COUNT = round(_unit * 3)
+                    # 반올림 오차는 템플릿 배경이 흡수 -> 총합은 항상 IMAGES_PER_CLASS와 일치
+                    TEMPLATE_COUNT = _rest - WHITE_COUNT - BLACK_COUNT - REAL_COUNT
 
                     NEG_END = NEG_COUNT
                     TEMPLATE_END = NEG_END + TEMPLATE_COUNT
@@ -323,10 +355,19 @@ class YoloTrainWorker(QThread):
                             if not labels: continue
 
                         # 네거티브 이미지는 labels가 빈 리스트인 채로 그대로 저장 (빈 라벨 파일 = "이 이미지엔 물체 없음")
-                        is_val = (i % 5 == 0)
+                        is_val = (i % VAL_EVERY == 0)
                         cv2.imwrite(str((img_val if is_val else img_train) / f"{i:06d}.jpg"), bg)
                         with open((lbl_val if is_val else lbl_train) / f"{i:06d}.txt", "w") as f:
                             f.write("\n".join(labels))
+
+                    # ⭐ 생성이 끝까지 완료된 경우에만 표식 파일 기록 (중단 시에는 남기지 않음)
+                    if self._is_running:
+                        with open(done_marker, "w", encoding="utf-8") as f:
+                            json.dump({
+                                "images_per_class": IMAGES_PER_CLASS,
+                                "train": len(list(img_train.glob("*.jpg"))),
+                                "val": len(list(img_val.glob("*.jpg"))),
+                            }, f, ensure_ascii=False, indent=2)
 
                 # 3. 제품 단독 yaml 파일 생성
                 cls_yaml = cls_dataset_dir / f"dataset_{cls}.yaml"
@@ -348,25 +389,35 @@ class YoloTrainWorker(QThread):
                     self.log.emit(f"[INFO] 불필요한 재학습을 건너뛰고 기존 모델을 유지합니다.")
                 else:
                     # 4. YOLO 개별 학습 시작 (가중치가 없을 때만 실행)
-                    self.log.emit(f"[YOLO] '{cls}' 모델 학습 시작 (Epoch: 10 / Device: {target_device})...")
+                    self.log.emit(f"[YOLO] '{cls}' 모델 학습 시작 (Epoch: {train_epochs} / Device: {target_device})...")
                     model = YOLO(str(BASE_MODEL))
                     run_name = f"seg_{cls}"
-                    
-                    model.train(
+
+                    train_kwargs = dict(
                         data=str(cls_yaml),
                         task="segment",
-                        epochs=10,
+                        epochs=train_epochs,
                         imgsz=640,
-                        batch=train_batch,      
-                        device=target_device,   
+                        batch=train_batch,
+                        device=target_device,
                         project=str(WEIGHT_PATH),
                         name=run_name,
                         exist_ok=True,
-                        workers=train_workers,  
+                        workers=train_workers,
                         verbose=True,
                         patience=5,
-                        cache=False             
+                        cache=True,     # 80장이면 RAM 캐시가 저렴하고 JPEG 디코딩 반복을 줄여줌
+                        amp=False,      # CPU에선 AMP 무의미. ultralytics AMP 체크가 yolo11n.pt를
+                                        # 인터넷에서 받으려 해서 오프라인 고객 PC에서 실패할 수 있음
+                        mosaic=0.0,     # 합성 데이터라 배경/배치가 이미 충분히 다양함
+                        plots=False,    # 학습 그래프 생성 생략 (시간 절약)
                     )
+
+                    # CPU 모드일 때만 backbone 동결
+                    if train_freeze is not None:
+                        train_kwargs["freeze"] = train_freeze
+
+                    model.train(**train_kwargs)
 
                     # 5. 학습 완료된 가중치를 best_제품명.pt로 복사
                     trained_best = WEIGHT_PATH / run_name / "weights/best.pt"
@@ -683,8 +734,8 @@ class AutoYoloSegDialog(QDialog):
                 
             event.accept()
             
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    dlg = AutoYoloSegDialog()
-    dlg.show()
-    sys.exit(app.exec_())
+# if __name__ == "__main__":
+#     app = QApplication(sys.argv)
+#     dlg = AutoYoloSegDialog()
+#     dlg.show()
+#     sys.exit(app.exec_())
